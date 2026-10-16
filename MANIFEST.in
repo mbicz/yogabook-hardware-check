@@ -1,0 +1,2 @@
+recursive-include checks *.py *.sh *.c *.md
+recursive-include tests *.py

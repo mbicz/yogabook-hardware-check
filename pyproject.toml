@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yogabook-hardware-check"
+version = "0.1.0"
+description = "Layered Yoga Book hardware checks using ordinary pytest and shell assertions"
+requires-python = ">=3.10"
+dependencies = ["pytest>=7.2", "pytest-json-report>=1.5"]
+license = "MIT"
+
+[project.scripts]
+yb-check = "ybcheck.cli:main"
+
+[project.entry-points.pytest11]
+ybcheck = "ybcheck.plugin"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --import-mode=importlib"
+pythonpath = ["."]
