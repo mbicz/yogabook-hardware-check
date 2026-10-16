@@ -4,7 +4,7 @@ from checks.yogabook.pen import device_mapping, graphical_session, libwacom_devi
 
 DATAFILE = """[Device]
 Name=Wacom HID 169 Pen
-DeviceMatch=i2c:056a:0169;
+DeviceMatch=i2c|056a|0169;
 IntegratedIn=Display;System;
 
 # Wacom HID 169 Pen

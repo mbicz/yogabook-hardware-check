@@ -1,6 +1,6 @@
 """Pen orientation is Mutter's built-in-panel mapping, not a udev rotation.
 
-Mutter 43.8 maps the libwacom-integrated pen to the built-in DSI panel and applies
+Mutter maps the libwacom-integrated pen to the built-in DSI panel and applies
 the panel-orientation + display-rotation transform. An explicit per-user `output`
 value can never match this EDID-less panel and leaves the pen unmapped; a udev
 LIBINPUT_CALIBRATION_MATRIX adds a second rotation outside GNOME. See docs/05.
