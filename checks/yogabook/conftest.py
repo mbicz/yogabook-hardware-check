@@ -14,13 +14,21 @@ def pytest_addoption(parser):
     group.addoption('--gps-nmea', default=None, help='Inspect a saved capture instead of live receiver operation')
 
 
+# Android-edition firmware does not report a Lenovo model name. This is the
+# same DMI identity the kernel's YB1-X90F/X90L panel-orientation quirk uses.
+BOARD_DMI = {
+    'sys_vendor': 'Intel Corporation',
+    'product_name': 'CHERRYVIEW D1 PLATFORM',
+    'product_version': 'YETI-11',
+}
+
+
 def pytest_runtest_setup(item):
     if platform.system() != 'Linux':
         pytest.skip('blocked: Yoga Book checks must run locally on Linux')
-    product_path = Path('/sys/class/dmi/id/product_name')
     try:
-        product = product_path.read_text().strip()
+        detected = {key: (Path('/sys/class/dmi/id') / key).read_text().strip() for key in BOARD_DMI}
     except OSError as exc:
         pytest.skip(f'blocked: cannot identify Yoga Book model: {exc}')
-    if 'YB1-X90' not in product:
-        pytest.skip(f'blocked: suite targets YB1-X90F; detected {product!r}')
+    if detected != BOARD_DMI:
+        pytest.skip(f'blocked: suite targets YB1-X90F/X90L (DMI {BOARD_DMI}); detected {detected}')

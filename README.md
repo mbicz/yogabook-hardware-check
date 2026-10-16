@@ -29,7 +29,7 @@ Or invoke pytest directly; installing the package registers the plugin:
   --json-report-file=reports/baseline.json
 ```
 
-`run` and `list` forward unknown arguments to pytest, including paths, `-k`, `-m`, and suite-defined options. Without paths, normal pytest discovery/configuration applies. `list --json PATH` emits collected metadata without executing test bodies. `run` refuses to overwrite an existing report.
+`run` and `list` forward unknown arguments to pytest, including paths, `-k`, `-m`, and suite-defined options. Without paths, normal pytest discovery/configuration applies. `list --json` emits collected metadata to standard output without executing test bodies. `run` refuses to overwrite an existing report.
 
 ## Assertion contract
 

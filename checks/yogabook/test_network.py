@@ -74,7 +74,8 @@ def bluetooth(evidence):
     assert found, "required onboard BCM4356/BCM2E1A UART Bluetooth controller is missing"
     for item in found:
         assert item["drivers"], f"Bluetooth controller has no bound ancestor: {item}"
-        assert re.fullmatch(r"[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}", item["address"]), item
+        if item["address"]:
+            assert re.fullmatch(r"[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}", item["address"]), item
     return found
 
 
@@ -92,7 +93,7 @@ def test_bluetooth_controller_read(shell, evidence):
         pytest.skip("blocked: missing bluetoothctl or hciconfig for read-only controller query")
     results = []
     for item in found:
-        if bluetoothctl:
+        if bluetoothctl and item["address"]:
             result = shell(bluetoothctl, "--timeout", "5", "show", item["address"], timeout=7)
             output = result.stdout + result.stderr
             if any(message in output for message in ("No default controller", "not available", "Failed to connect", "Waiting to connect", "org.bluez.Error.NotReady", "org.freedesktop.DBus.Error")):
@@ -102,13 +103,20 @@ def test_bluetooth_controller_read(shell, evidence):
             match = re.search(r"Powered:\s*(yes|no)", result.stdout)
             assert match, f"missing powered state: {result.stdout}"
             powered = match[1] == "yes"
-        else:
+        elif hciconfig:
             result = shell(hciconfig, item["name"], timeout=5)
             if result.returncode and "Operation not permitted" in result.stderr:
                 pytest.skip("blocked: permission required for hciconfig controller query")
             assert result.returncode == 0, result.stderr
-            assert item["address"].lower() in result.stdout.lower(), result.stdout
+            assert re.search(rf"^{re.escape(item['name'])}:", result.stdout, re.M), result.stdout
+            address = re.search(r"BD Address:\s*([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})\b", result.stdout)
+            assert address, f"indexed HCI query returned no valid controller address: {result.stdout}"
+            assert address[1] != "00:00:00:00:00:00", "HCI controller returned an uninitialized address"
+            if item["address"]:
+                assert address[1].lower() == item["address"].lower(), result.stdout
             powered = bool(re.search(r"\bUP\b", result.stdout))
+        else:
+            pytest.skip("blocked: kernel exposes no Bluetooth address attribute; install hciconfig (bluez) for an indexed HCI query")
         results.append({"identity": item, "powered": powered, "output": result.stdout})
         evidence("bluetooth_queries", results)
         if not powered:

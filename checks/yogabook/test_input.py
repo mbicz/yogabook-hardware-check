@@ -7,7 +7,8 @@ import pytest
 
 from checks.yogabook.platform import bitmap_has, identity, text
 
-KINDS = ("halo", "touchscreen", "pen", "keyboard", "touchpad", "tablet_switch", "lid")
+KINDS = ("halo", "touchscreen", "pen", "keyboard", "touchpad", "tablet_switch", "lid",
+         "volume_buttons", "power_button")
 
 
 def input_inventory():
@@ -17,7 +18,8 @@ def input_inventory():
         result.append({**identity(device), "node": str(Path("/dev/input") / path.name),
                        "name": text(device / "name"), "phys": text(device / "phys"),
                        "vendor": text(device / "id/vendor"), "product": text(device / "id/product"),
-                       "ev": text(device / "capabilities/ev"), "sw": text(device / "capabilities/sw")})
+                       "ev": text(device / "capabilities/ev"), "sw": text(device / "capabilities/sw"),
+                       "key": text(device / "capabilities/key")})
     return result
 
 
@@ -30,6 +32,12 @@ def matches(item, kind):
         return "hideep" in name
     if kind == "pen":
         return "wacom" in name and item["vendor"].lower() == "056a" and item["product"].lower() == "0169"
+    if kind == "volume_buttons":
+        return ("gpio-keys" in driver_names and bitmap_has(item["ev"], 1)
+                and all(bitmap_has(item["key"], key) for key in (114, 115)))
+    if kind == "power_button":
+        return ("/PNP0C0C:" in item["resolved"] and bitmap_has(item["ev"], 1)
+                and bitmap_has(item["key"], 116))
     if kind in ("keyboard", "touchpad", "tablet_switch"):
         expected = "virtual-" + kind.replace("_", "-")
         return name == expected and "/virtual/input/" in item["resolved"]

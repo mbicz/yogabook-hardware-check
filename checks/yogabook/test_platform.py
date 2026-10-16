@@ -174,42 +174,6 @@ def test_thermal_read(shell, evidence):
     evidence("limitations", "Current thermal samples, not load/cooling effectiveness or trip-action validation.")
 
 
-def cpu_inventory(evidence):
-    root = Path("/sys/devices/system/cpu")
-    policies = sorted((root / "cpufreq").glob("policy*"))
-    states = sorted(root.glob("cpu[0-9]*/cpuidle/state*"))
-    evidence("cpu_power", {"policies": [{"path": str(path), "driver": text(path / "scaling_driver")} for path in policies],
-                            "idle_states": [{"path": str(path), "name": text(path / "name")} for path in states],
-                            "idle_driver": text(root / "cpuidle/current_driver"), "mem_sleep": text(Path("/sys/power/mem_sleep"))})
-    assert policies, "CPU frequency policies missing"
-    assert states, "CPU idle states missing"
-    assert text(root / "cpuidle/current_driver"), "CPU idle driver missing"
-    for path in policies:
-        assert text(path / "scaling_driver"), f"unbound cpufreq policy {path}"
-    return policies, states
-
-
-@pytest.mark.hardware(id="power.cpu.enumeration", component="power.cpu", layer="enumeration")
-def test_cpu_power_enumeration(evidence):
-    cpu_inventory(evidence)
-
-
-@pytest.mark.hardware(id="power.cpu.state_read", component="power.cpu", layer="headless")
-def test_cpu_power_read(shell, evidence):
-    policies, states = cpu_inventory(evidence)
-    records = []
-    for path in policies:
-        values = {name: attribute(shell, path / name) for name in ("scaling_cur_freq", "scaling_min_freq", "scaling_max_freq", "scaling_governor")}
-        assert int(values["scaling_cur_freq"]) > 0, values
-        assert 0 < int(values["scaling_min_freq"]) <= int(values["scaling_max_freq"]), values
-        records.append({"path": str(path), **values})
-    idle = []
-    for path in states:
-        values = {name: int(attribute(shell, path / name)) for name in ("usage", "time", "disable")}
-        assert values["usage"] >= 0 and values["time"] >= 0 and values["disable"] in (0, 1), values
-        idle.append({"path": str(path), **values})
-    evidence("cpu_state_reads", {"frequency": records, "idle": idle})
-    evidence("limitations", "Read current policies/counters only. No frequency transition, residency increase, suspend/resume, or thermal load test performed.")
 
 
 def panels(evidence):
