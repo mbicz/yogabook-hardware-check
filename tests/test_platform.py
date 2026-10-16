@@ -78,3 +78,31 @@ def test_block_dependency_cycle_is_not_infinite_recursion(tmp_path):
     (block / "slaves/dm-3").symlink_to(block, target_is_directory=True)
     with pytest.raises(AssertionError, match="cycle"):
         block_leaves(block)
+
+
+def test_thermal_failures_do_not_hide_other_sensors_or_cpu_hwmon(tmp_path, monkeypatch):
+    import subprocess
+    from checks.yogabook import test_platform as platform_checks
+
+    thermal, hwmon = tmp_path / "thermal", tmp_path / "hwmon"
+    for index, (name, value) in enumerate((("STR0", "-273150"), ("STR2", "-273150"), ("PNIT", "42000"))):
+        zone = thermal / f"thermal_zone{index}"
+        zone.mkdir(parents=True)
+        (zone / "type").write_text(name)
+        (zone / "temp").write_text(value)
+    core = hwmon / "hwmon9"
+    core.mkdir(parents=True)
+    (core / "name").write_text("coretemp")
+    (core / "temp2_label").write_text("Core 0")
+    (core / "temp2_input").write_text("38000")
+    roots = {"/sys/class/thermal": thermal, "/sys/class/hwmon": hwmon}
+    monkeypatch.setattr(platform_checks, "Path", lambda name: roots.get(str(name), Path(name)))
+    evidence = {}
+    with pytest.raises(AssertionError, match="invalid temperature channels"):
+        platform_checks.test_thermal_read(
+            lambda *argv, **kwargs: subprocess.run(argv, capture_output=True, text=True, **kwargs),
+            lambda key, value: evidence.update({key: value}))
+    assert {item["type"] for item in evidence["invalid_temperature_channels"]} == {"STR0", "STR2"}
+    measured = {item["type"]: item["millidegrees_c"] for item in evidence["temperatures"]}
+    assert measured["PNIT"] == 42000
+    assert measured["coretemp/Core 0"] == 38000

@@ -163,15 +163,27 @@ def test_thermal_enumeration(evidence):
 def test_thermal_read(shell, evidence):
     zones = sorted(Path("/sys/class/thermal").glob("thermal_zone*"))
     assert zones, "no thermal zones"
+    channels = [(path / "temp", text(path / "type")) for path in zones]
+    for hwmon in sorted(Path("/sys/class/hwmon").glob("hwmon*")):
+        for path in sorted(hwmon.glob("temp*_input")):
+            label = text(path.with_name(path.name.replace("_input", "_label")))
+            channels.append((path, text(hwmon / "name") + (f"/{label}" if label else "")))
     records = []
-    for path in zones:
-        temperature = int(attribute(shell, path / "temp"))
-        records.append({"path": str(path), "type": text(path / "type"), "millidegrees_c": temperature})
+    for path, name in channels:
+        record = {"path": str(path), "type": name}
+        try:
+            record["millidegrees_c"] = int(attribute(shell, path))
+        except (AssertionError, ValueError) as error:
+            record["error"] = str(error)
+        records.append(record)
         evidence("temperatures", records)
-        assert -40000 <= temperature <= 150000, records[-1]
-        if temperature >= 95000:
-            warnings.warn(f"{path.name} temperature {temperature / 1000:g} C", HardwareWarning)
-    evidence("limitations", "Current thermal samples, not load/cooling effectiveness or trip-action validation.")
+        if record.get("millidegrees_c", 0) >= 95000:
+            warnings.warn(f"{name} temperature {record['millidegrees_c'] / 1000:g} C", HardwareWarning)
+    invalid = [record for record in records if "error" in record
+               or not -40000 <= record["millidegrees_c"] <= 150000]
+    evidence("invalid_temperature_channels", invalid)
+    evidence("limitations", "All discovered thermal-zone and hwmon temperature inputs sampled, including CPU cores. Shared hwmon/thermal aliases are not distinct sensors. Readable policy constants are not proof of physical response, cooling effectiveness or trip actions.")
+    assert not invalid, f"invalid temperature channels: {invalid}"
 
 
 
