@@ -8,7 +8,7 @@ import pytest
 from checks.yogabook.platform import bitmap_has, identity, text
 
 KINDS = ("halo", "touchscreen", "pen", "keyboard", "touchpad", "tablet_switch", "lid",
-         "volume_buttons", "power_button")
+         "volume_buttons", "power_button", "headset")
 
 
 def input_inventory():
@@ -38,8 +38,17 @@ def matches(item, kind):
     if kind == "power_button":
         return ("/PNP0C0C:" in item["resolved"] and bitmap_has(item["ev"], 1)
                 and bitmap_has(item["key"], 116))
-    if kind in ("keyboard", "touchpad", "tablet_switch"):
-        expected = "virtual-" + kind.replace("_", "-")
+    if kind == "headset":
+        return (any(token in name for token in ("headset", "headphone", "jack"))
+                and "cht" in name and bitmap_has(item["ev"], 5)
+                and bitmap_has(item["sw"], 2))
+    if kind == "tablet_switch":
+        # lenovo-yogabook reports the back-side hall sensor (keyboard half folded
+        # behind the screen) as SW_TABLET_MODE.
+        return (name == "lenovo yoga book tablet mode switch" and bitmap_has(item["ev"], 5)
+                and bitmap_has(item["sw"], 1))
+    if kind in ("keyboard", "touchpad"):
+        expected = "virtual-" + kind
         return name == expected and "/virtual/input/" in item["resolved"]
     return "gpio-keys" in driver_names and bitmap_has(item["ev"], 5) and bitmap_has(item["sw"], 0)
 
@@ -60,10 +69,8 @@ def cases(layer):
 @pytest.mark.parametrize("kind", cases("enumeration"))
 def test_input_bound(kind, evidence):
     for item in selected(kind, evidence):
-        if kind in ("keyboard", "touchpad", "tablet_switch"):
-            assert bitmap_has(item["ev"], 5 if kind == "tablet_switch" else 1 if kind == "keyboard" else 3), item
-            if kind == "tablet_switch":
-                assert bitmap_has(item["sw"], 1), item
+        if kind in ("keyboard", "touchpad"):
+            assert bitmap_has(item["ev"], 1 if kind == "keyboard" else 3), item
         else:
             assert item["drivers"], f"required physical input has no bound ancestor: {item}"
 
@@ -91,7 +98,7 @@ finally:
 def test_input_queries(kind, shell, evidence):
     results = []
     for item in selected(kind, evidence):
-        operation = "switch" if kind in ("lid", "tablet_switch") else "version"
+        operation = "switch" if kind in ("lid", "tablet_switch", "headset") else "version"
         result = shell(sys.executable, "-c", IOCTL_QUERY, item["node"], operation, timeout=5)
         if result.returncode == 78:
             pytest.skip(result.stdout.strip())

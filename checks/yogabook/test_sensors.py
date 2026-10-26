@@ -1,10 +1,12 @@
 """Read every discovered IIO instance; identity is not a stimulus-response test."""
 from pathlib import Path
 import time
+import warnings
 
 import pytest
 
 from checks.yogabook.platform import SENSOR_NAMES, attribute, numeric, sensors
+from ybcheck.plugin import HardwareWarning
 
 
 def cases(layer):
@@ -57,4 +59,8 @@ def test_iio_read_channels(kind, shell, evidence):
                 time.sleep(0.1)
         samples.append(data)
         evidence("iio_samples", samples)
-    evidence("limitations", "Two finite channel reads per instance only. No movement, orientation accuracy, mounting, freshness, or light responsiveness proven; constant ALS values are not a failure or proof of changing light.")
+    if kind == "ambientlight" and all(
+            all(value == 0 for value in numeric(raw))
+            for item in samples for reading in item["samples"] for raw in reading.values()):
+        warnings.warn("Both ALS instances returned only zero; known light-sensor support/response gap, not a clean acceptance. Illuminate/cover both sensors and record human.sensors.als.response.", HardwareWarning)
+    evidence("limitations", "Two finite channel reads per instance only. No movement, orientation accuracy, mounting, freshness, or light responsiveness proven; nonzero constant ALS also requires a real light stimulus.")

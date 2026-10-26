@@ -121,6 +121,18 @@ def parse_ucm_names(text: str) -> list[str]:
             if (match := re.match(r"\s*\d+:\s*(\S.*?)\s*$", line))]
 
 
+def parse_ucm_pcm(text: str, card: str) -> list[str]:
+    """Physical hw: PCMs of `card` named in alsaucm `get` output.
+
+    alsaucm prints either the bare value or `Identifier=value`, and alsa-lib
+    1.2.11+ prefixes UCM-defined PCM names with its private configuration
+    namespace (`_ucm0001.hw:chtyogabook`); both refer to the same hw: device.
+    """
+    pattern = (rf"(?m)^\s*(?:[^=\s]+=)?(?:_ucm\d+\.)?"
+               rf"(hw:(?:CARD=)?{re.escape(card)}(?:,(?:DEV=)?\d+)?)\s*$")
+    return re.findall(pattern, text)
+
+
 @dataclass(frozen=True)
 class CaptureParameters:
     format: str

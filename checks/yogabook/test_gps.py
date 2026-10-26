@@ -165,3 +165,30 @@ def test_gps_fix(gps_capture, evidence):
         warnings.warn("GPS receiver emitted valid NMEA but no validated GGA quality>0 or active RMC fix. "
                       "Indoor/obstructed sky or acquisition time can prevent positioning; repeat outdoors "
                       "with a longer --gps-seconds interval. Satellite visibility is not a fix.", HardwareWarning)
+
+
+@pytest.mark.hardware(id="gps.service.configuration", component="gps", layer="userspace")
+def test_gps_service_configuration(shell, require_program, evidence):
+    require_program("systemctl")
+    result = shell("systemctl", "list-unit-files", "--type=service", "--no-legend", "--no-pager", timeout=6)
+    if result.returncode and any(token in result.stderr for token in ("Failed to connect to bus", "Access denied")):
+        pytest.skip(f"blocked: cannot query GPS service installation: {result.stderr.strip()}")
+    assert result.returncode == 0, result.stderr
+    units = [line.split()[0] for line in result.stdout.splitlines()
+             if line.split() and "@." not in line.split()[0]
+             and ("gps" in line.split()[0].lower() or "bcm4752" in line.split()[0].lower())]
+    records = []
+    for unit in units:
+        shown = shell("systemctl", "show", unit, "--no-pager",
+                      "--property=LoadState,ActiveState,SubState,Result,ExecStart,FragmentPath", timeout=5)
+        assert shown.returncode == 0, shown.stderr
+        values = dict(line.split("=", 1) for line in shown.stdout.splitlines() if "=" in line)
+        records.append({"unit": unit, **values})
+    evidence("gps_services", records)
+    evidence("gps_initializer_binary", shutil.which("bcm4752-init"))
+    evidence("limitations", "Installed unit/current service state only; neither gpsd nor an initializer process proves live receiver traffic or a fix. No service/socket activation, UART open, rfkill/GPIO or power changes. Stock-launcher acquisition remains separately opt-in.")
+    assert not [item for item in records if item.get("ActiveState") == "failed"], f"GPS service failed: {records}"
+    if not records:
+        warnings.warn("No GPS/bcm4752 service installed; UART/rfkill enumeration is not an operational managed receiver. Explicit launcher acquisition may still work.", HardwareWarning)
+    elif not any(item.get("ActiveState") == "active" for item in records):
+        warnings.warn("GPS services installed but inactive; intentionally idle is allowed, receiver operation remains unproven", HardwareWarning)

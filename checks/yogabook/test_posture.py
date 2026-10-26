@@ -139,23 +139,30 @@ def test_posture_services(shell, evidence, require_program):
 @pytest.mark.hardware(id="posture.tablet_switch.policy", component="posture.policy", layer="userspace")
 def test_tablet_switch_policy(shell, evidence, require_program):
     require_program("udevadm")
-    require_program("libinput")
     devices = {}
     for event in Path("/sys/class/input").glob("event*"):
         name = text(event / "device/name")
-        if name in {"virtual-tablet-switch", "virtual-touchpad"}:
+        if name in {"Lenovo Yoga Book Tablet Mode Switch", "Lenovo Yoga Book Posture Switch",
+                    "virtual-tablet-switch"}:
             devices[name] = event
-    evidence("virtual_mode_devices", {name: str(path) for name, path in devices.items()})
-    if devices.keys() != {"virtual-tablet-switch", "virtual-touchpad"}:
-        pytest.skip("blocked: virtual switch/touchpad pair not currently available; Halo pen mode can intentionally remove it")
-    for name, event in devices.items():
-        properties = parse_properties(policy_query(shell, evidence, "udevadm", "info", "--query=property", "--path", str(event)))
-        expected = "ID_INPUT_SWITCH" if name == "virtual-tablet-switch" else "ID_INPUT_TOUCHPAD"
-        assert properties.get(expected) == "1", f"{name} missing {expected}: {properties}"
-        if name == "virtual-tablet-switch":
-            assert properties.get("ID_INPUT_TOUCHPAD") != "1", "dedicated switch must not be dispatched as a touchpad"
-    node = str(Path("/dev/input") / devices["virtual-touchpad"].name)
-    quirks = parse_properties(policy_query(shell, evidence, "libinput", "quirks", "list", node))
-    if quirks.get("ModelTabletModeNoSuspend") != "1":
-        warnings.warn("Effective libinput ModelTabletModeNoSuspend=1 quirk missing; synthetic tablet pulses may suppress the touchpad. A snapshot does not prove pointer freeze or recovery.", HardwareWarning)
-    evidence("limitations", "Udev dispatch tags/effective libinput quirk queried only. Software SW_TABLET_MODE OFF→ON pulses keep Mutter touch mode; their current state is not physical fold or lid evidence. Observe desktop auto-rotation and >40-second pointer behavior separately.")
+    evidence("tablet_mode_devices", {name: str(path) for name, path in devices.items()})
+    assert "virtual-tablet-switch" not in devices, (
+        "a synthetic virtual-tablet-switch is present: it claims tablet mode in every pose "
+        "and competes with the posture switch")
+    if "Lenovo Yoga Book Tablet Mode Switch" not in devices:
+        pytest.skip("blocked: lenovo-yogabook tablet mode switch not present (kernel without the patch)")
+    # Desktops follow the last event of any tablet mode switch, so libinput must
+    # see exactly one: yogabook-modes-handler's posture switch (folded, flat or
+    # tent), not the kernel's hall-sensor switch (folded only).
+    assert "Lenovo Yoga Book Posture Switch" in devices, (
+        "yogabook-modes-handler's posture switch is missing: desktops get no tablet mode "
+        "while the machine lies flat or stands in tent pose")
+    kernel = parse_properties(policy_query(shell, evidence, "udevadm", "info", "--query=property",
+                                           "--path", str(devices["Lenovo Yoga Book Tablet Mode Switch"])))
+    posture = parse_properties(policy_query(shell, evidence, "udevadm", "info", "--query=property",
+                                            "--path", str(devices["Lenovo Yoga Book Posture Switch"])))
+    assert kernel.get("LIBINPUT_IGNORE_DEVICE") == "1", (
+        f"libinput uses the kernel hall-sensor switch next to the posture switch: {kernel}")
+    assert posture.get("ID_INPUT_SWITCH") == "1" and posture.get("LIBINPUT_IGNORE_DEVICE") != "1", (
+        f"posture switch is not a libinput switch: {posture}")
+    evidence("limitations", "Udev classification only. The posture value follows the hinge angle and the fold sensor; desktop auto-rotation is observed separately.")

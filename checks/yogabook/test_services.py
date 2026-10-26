@@ -8,26 +8,33 @@ from checks.yogabook.platform import attribute, numeric, sensors
 from ybcheck.plugin import HardwareWarning
 
 
-def unit_state(shell, unit, evidence, key):
-    result = shell("systemctl", "show", unit, "--no-pager", "--property=LoadState,ActiveState,SubState,Result,MainPID,ExecMainStatus,NRestarts,FragmentPath,ExecStart,WorkingDirectory", timeout=6)
+def unit_state(shell, unit, evidence, key, required=True):
+    result = shell("systemctl", "show", unit, "--no-pager", "--property=LoadState,UnitFileState,ActiveState,SubState,Result,MainPID,ExecMainStatus,NRestarts,FragmentPath,ExecStart,WorkingDirectory", timeout=6)
     if result.returncode and ("Access denied" in result.stderr or "Failed to connect to bus" in result.stderr):
         pytest.skip(f"blocked: cannot query system manager: {result.stderr.strip()}")
     values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
     evidence(key, {"unit": unit, "returncode": result.returncode, "properties": values, "stderr": result.stderr})
-    assert result.returncode == 0, result.stderr
-    assert values.get("LoadState") == "loaded", f"required {unit} missing/unloadable: {values}"
-    assert values.get("ActiveState") != "failed", f"required {unit} failed: {values}"
+    unavailable_optional = not required and values.get("LoadState") in {"not-found", "masked"}
+    assert result.returncode == 0 or unavailable_optional, result.stderr
+    if not unavailable_optional:
+        assert values.get("LoadState") == "loaded", f"{unit} missing/unloadable: {values}"
+    assert values.get("ActiveState") != "failed", f"{unit} failed: {values}"
     return values
 
 
-@pytest.mark.parametrize("unit", [
-    pytest.param("touch-keyboard-handler.service", marks=pytest.mark.hardware(id="services.touch_keyboard", component="touch.halo", layer="userspace")),
-    pytest.param("yogabook-lid-watch.service", marks=pytest.mark.hardware(id="services.lid_watch", component="power.lid", layer="userspace")),
+@pytest.mark.parametrize("unit,required", [
+    pytest.param("touch-keyboard-handler.service", True, marks=pytest.mark.hardware(id="services.touch_keyboard", component="touch.halo", layer="userspace")),
+    pytest.param("yogabook-lid-watch.service", False, marks=pytest.mark.hardware(id="services.lid_watch", component="power.lid", layer="userspace")),
 ])
-def test_required_daemon(unit, shell, evidence, require_program):
+def test_daemon_policy(unit, required, shell, evidence, require_program):
     require_program("systemctl")
-    values = unit_state(shell, unit, evidence, "service")
-    assert values.get("ActiveState") == "active" and int(values.get("MainPID", "0")) > 0, f"required persistent daemon is not running: {values}"
+    values = unit_state(shell, unit, evidence, "service", required=required)
+    active = values.get("ActiveState") == "active" and int(values.get("MainPID", "0")) > 0
+    if not required and not active:
+        evidence("limitations", "The local lid-watch helper is optional, not a universal hardware requirement. Native logind/lid handling and masked sleep policy are assessed independently; physical lid/suspend acceptance is not established.")
+        warnings.warn(f"Optional {unit} is not running ({values.get('UnitFileState', values.get('LoadState'))}); inspect intended lid/sleep policy rather than starting it to satisfy an audit", HardwareWarning)
+        return
+    assert active, f"required persistent daemon is not running: {values}"
     assert values.get("Result") == "success" and values.get("ExecMainStatus") == "0", values
     if int(values.get("NRestarts", "0")):
         warnings.warn(f"{unit} has restarted {values['NRestarts']} times this activation; inspect current-boot journal", HardwareWarning)
@@ -97,3 +104,16 @@ def test_sensor_proxy_configuration(shell, evidence, require_program):
             assert matrix, f"base accelerometer mount matrix missing: {item}"
             assert len(numeric(matrix.replace(";", " "))) == 9, f"invalid base accelerometer mount matrix: {item}"
     evidence("limitations", "Actual udev base/display classification and finite base matrix only. Physical mapping, mounting correctness and GNOME tilt response require human stimulus; no boot-dependent sensor instance suffix is assumed.")
+
+
+@pytest.mark.hardware(id="services.system.failed_units", component="services.system", layer="userspace")
+def test_system_failed_units(shell, require_program, evidence):
+    require_program("systemctl")
+    result = shell("systemctl", "--failed", "--no-legend", "--plain", "--no-pager", timeout=6)
+    if result.returncode and any(token in result.stderr.lower() for token in ("failed to connect", "permission denied", "access denied")):
+        pytest.skip(f"blocked: cannot query system manager: {result.stderr.strip()}")
+    assert result.returncode == 0, result.stderr
+    evidence("failed_system_units", result.stdout)
+    if result.stdout.strip():
+        warnings.warn(f"Current failed system units; diagnose separately from hardware binding: {result.stdout.strip()}", HardwareWarning)
+    evidence("limitations", "Current system failure state only; no reset-failed, restart or policy changes. An unrelated software failure remains visible without claiming hardware failure.")

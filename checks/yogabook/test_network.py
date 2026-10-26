@@ -7,6 +7,8 @@ import warnings
 
 import pytest
 
+from checks.yogabook.attachments import firmware_files
+from checks.yogabook.diagnostics import collect_logs
 from checks.yogabook.platform import attribute, identity, text
 from ybcheck.plugin import HardwareWarning
 
@@ -122,3 +124,37 @@ def test_bluetooth_controller_read(shell, evidence):
         if not powered:
             warnings.warn(f"Bluetooth controller {item['name']} is powered off; no state changed", HardwareWarning)
     evidence("limitations", "Controller management/powered-state query only; no discovery, pairing, traffic, or external device required.")
+
+
+@pytest.mark.hardware(id="network.firmware.installed", component="network.firmware", layer="enumeration")
+def test_radio_firmware_installed(evidence):
+    wifi_files = firmware_files(("brcm/brcmfmac4356-pcie*.bin",))
+    bt_files = firmware_files(("brcm/BCM4356A2.hcd",))
+    evidence("radio_firmware_files", {"wifi": wifi_files, "bluetooth": bt_files})
+    assert wifi_files, "BCM4356 PCIe WiFi firmware absent (generic fallback is valid; DMI-named blob is not required)"
+    if not bt_files:
+        warnings.warn("BCM4356A2.hcd patch absent; Bluetooth may run ROM firmware. Install only a lawfully obtained board-compatible stock patch; never redistribute it with this suite.", HardwareWarning)
+    evidence("limitations", "Installed files only, including updates/compressed variants; no inference that these bytes were loaded this boot. txcap_blob and DMI-specific fallback misses are not standalone failures.")
+
+
+@pytest.mark.hardware(id="network.firmware.current_boot", component="network.firmware", layer="headless")
+def test_radio_firmware_boot(evidence):
+    capture = collect_logs()
+    evidence("firmware_log_collection", {key: value for key, value in capture.items() if key != "records"})
+    records = [item for item in capture["records"] if re.search(r"brcmfmac|Bluetooth:.*BCM", item["message"], re.I)]
+    evidence("radio_firmware_boot_messages", records)
+    if not capture["records"]:
+        pytest.skip("blocked: current-boot kernel logs unreadable; cannot verify radio firmware loading")
+    wifi_loaded = any(re.search(r"brcmfmac.*Firmware:.*(?:version|FWID)", item["message"], re.I) for item in records)
+    # ROM build 0000 precedes patch upload; require a later nonzero build, not
+    # merely the 'Patch' request line or the existence of an HCD on disk.
+    bt_builds = [int(match[1], 16) for item in records
+                 if (match := re.search(r"BCM4356A2.*build\s+([0-9a-f]+)\b", item["message"], re.I))]
+    evidence("radio_firmware_loaded", {"wifi_version_seen": wifi_loaded, "bluetooth_builds": bt_builds})
+    if not wifi_loaded:
+        warnings.warn("No successful WiFi firmware-version evidence in readable boot window; existing interface/link checks remain independent", HardwareWarning)
+    if not any(bt_builds):
+        warnings.warn("No nonzero BCM4356A2 patch build observed in readable boot window; ROM or truncated logs cannot establish patched Bluetooth", HardwareWarning)
+    if capture["truncated"] or capture["malformed"]:
+        warnings.warn("Firmware log window incomplete; absence of earlier load failures is not proven", HardwareWarning)
+    evidence("limitations", "Current-boot firmware-version messages, not radio transfer/RF performance. A later successful generic WiFi load recovers an earlier DMI-name miss. No fixed kernel, microcode or Bluetooth build revision is required.")

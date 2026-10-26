@@ -7,6 +7,7 @@ import warnings
 
 import pytest
 
+from checks.yogabook.attachments import usb_controllers
 from checks.yogabook.platform import attribute, bitmap_has, block_leaves, drivers, identity, root_mount, text
 from ybcheck.plugin import HardwareWarning
 
@@ -186,6 +187,20 @@ def test_thermal_read(shell, evidence):
     assert not invalid, f"invalid temperature channels: {invalid}"
 
 
+@pytest.mark.hardware(id="thermal.cooling.readback", component="thermal", layer="headless")
+def test_cooling_devices(shell, evidence):
+    devices = sorted(Path("/sys/class/thermal").glob("cooling_device*"))
+    evidence("cooling_devices", [{**identity(path), "type": text(path / "type")} for path in devices])
+    assert devices, "thermal cooling/throttling control endpoints missing"
+    records = []
+    for path in devices:
+        values = {name: attribute(shell, path / name) for name in ("type", "cur_state", "max_state")}
+        records.append({"path": str(path), **values})
+        evidence("cooling_state", records)
+        assert 0 <= int(values["cur_state"]) <= int(values["max_state"]), values
+    evidence("limitations", "Cooling API readback only; no state/trip/governor writes or workload generated. A cooling endpoint or zero current state does not prove effective throttling under load.")
+
+
 
 
 def panels(evidence):
@@ -262,11 +277,13 @@ def test_storage_read(shell, evidence):
 
 
 def usb_hosts(evidence):
-    hosts = [path for path in Path("/sys/bus/pci/devices").glob("*") if text(path / "class").startswith("0x0c03")]
+    inventory = usb_controllers()
+    evidence("usb_pci_functions", inventory)
+    hosts = [Path(item["path"]) for item in inventory if item["function"] == "host"]
     evidence("usb_hosts", [identity(path) for path in hosts])
-    assert hosts, "required PCI USB host controller missing"
+    assert hosts, "required PCI USB host controller missing (xDCI device controller is not a host)"
     for path in hosts:
-        assert (path / "driver").is_symlink(), f"unbound USB host {path}"
+        assert (path / "driver").is_symlink() and (path / "driver").exists(), f"unbound USB host {path}"
     return hosts
 
 
@@ -288,3 +305,15 @@ def test_usb_root_hub_read(shell, evidence):
             records.append({"host": identity(host), "hub": identity(hub), "values": values})
     evidence("usb_root_hub_reads", records)
     evidence("limitations", "Root hub attributes only; no external USB device or attachment required, port traffic/enumeration under load not proven.")
+
+
+@pytest.mark.hardware(id="platform.txe.enumeration", component="platform.txe", layer="enumeration")
+def test_optional_txe_support(evidence):
+    functions = [path for path in Path("/sys/bus/pci/devices").glob("*")
+                 if text(path / "vendor") == "0x8086" and text(path / "device") == "0x2298"]
+    evidence("optional_txe_functions", [identity(path) for path in functions])
+    if not functions:
+        pytest.skip("optional: Intel TXE PCI function not exposed by firmware")
+    if any(not (path / "driver").exists() for path in functions):
+        warnings.warn("Optional Intel TXE 8086:2298 security-engine function is exposed but unbound; inspect CONFIG_INTEL_MEI_TXE/module policy. This is not a general keyboard/camera/radio failure.", HardwareWarning)
+    evidence("limitations", "Optional security-engine driver exposure only; no ME/TXE commands, firmware updates or attestation/security-completeness claim.")

@@ -5,9 +5,11 @@ import subprocess
 
 import pytest
 
+from checks.yogabook.attachments import firmware_files
 from checks.yogabook.media import (
     blocked_audio_error, camera_inventory, observe_pcm, owned_process,
     parse_alsa_cards, parse_camera_result, parse_capture_parameters, parse_ucm_names,
+    parse_ucm_pcm,
     sustained_pcm_progress, write_tone,
 )
 
@@ -87,8 +89,7 @@ def test_audio_card_codec_firmware(evidence):
     evidence("codec_devices", codec_devices)
     assert codec_devices, "required RT5677 codec absent"
     assert any(item["driver"] and "rt5677" in item["driver"] for item in codec_devices), "RT5677 codec driver unbound"
-    firmware = [str(path) for base in (Path("/lib/firmware"), Path("/usr/lib/firmware"))
-                for path in base.glob("intel/fw_sst_22a8.bin*") if path.is_file()]
+    firmware = firmware_files(("intel/fw_sst_22a8.bin",))
     evidence("sst_firmware_files", sorted(set(firmware)))
     assert firmware, "required SST intel/fw_sst_22a8.bin firmware absent"
     evidence("limits", "physical ALSA/codec enumeration and installed firmware, not audible output or PipeWire-session health")
@@ -172,7 +173,7 @@ def test_audio_microphone_capture(tmp_path, shell, require_program, require_root
             pytest.skip(f"blocked: no unambiguous built-in microphone UCM device: {devices}")
         microphone = microphones[0]
         output = _ucm(shell, alsaucm, f"set _verb HiFi\nset _enadev {microphone}\nget CapturePCM/{microphone}\n")
-        matches = re.findall(r"(?m)^\s*(hw:(?:CARD=)?chtyogabook(?:,(?:DEV=)?\d+)?)\s*$", output)
+        matches = parse_ucm_pcm(output, "chtyogabook")
         if len(matches) != 1:
             pytest.skip(f"blocked: cannot resolve physical UCM CapturePCM: {output.strip()}")
         pcm = matches[0]

@@ -6,7 +6,7 @@ import pytest
 
 from checks.yogabook.media import (
     camera_inventory, parse_alsa_cards, parse_camera_result,
-    parse_capture_parameters, parse_pcm_status, parse_ucm_names,
+    parse_capture_parameters, parse_pcm_status, parse_ucm_names, parse_ucm_pcm,
     running_pointer_advanced, sustained_pcm_progress, write_tone,
 )
 
@@ -135,6 +135,13 @@ def test_capture_parameters_do_not_guess_unknown_or_unsupported_constraints(capa
 
 def test_ucm_list_does_not_treat_descriptions_as_device_names():
     assert parse_ucm_names('  0: HiFi\n    High fidelity\n1: "Speaker1"\n   Internal speakers\n') == ["HiFi", "Speaker1"]
+
+
+def test_ucm_pcm_accepts_alsa_lib_namespace_and_identifier_prefix():
+    # alsaucm output from alsa-lib 1.2.14 (Debian 13).
+    assert parse_ucm_pcm("CapturePCM/Mic1=_ucm0001.hw:chtyogabook\n", "chtyogabook") == ["hw:chtyogabook"]
+    assert parse_ucm_pcm("  hw:CARD=chtyogabook,DEV=1\n", "chtyogabook") == ["hw:CARD=chtyogabook,DEV=1"]
+    assert parse_ucm_pcm("CapturePCM/Mic1=hw:otherCard\n", "chtyogabook") == []
 
 
 def test_low_amplitude_tone_is_real_stereo_pcm_with_expected_duration(tmp_path):

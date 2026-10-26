@@ -5,13 +5,13 @@ the panel-orientation + display-rotation transform. An explicit per-user `output
 value can never match this EDID-less panel and leaves the pen unmapped; a udev
 LIBINPUT_CALIBRATION_MATRIX adds a second rotation outside GNOME. See docs/05.
 """
-import os
 from pathlib import Path
 import warnings
 
 import pytest
 
-from checks.yogabook.pen import device_mapping, graphical_session, libwacom_devices
+from checks.yogabook.desktop import desktop_session, session_bus_call
+from checks.yogabook.pen import device_mapping, libwacom_devices
 from ybcheck.plugin import HardwareWarning
 
 PEN = "Wacom HID 169 Pen"
@@ -55,33 +55,6 @@ def test_pen_has_no_competing_udev_rotation(shell, evidence):
                       "but other compositors would rotate twice. Remove the pen udev rule.", HardwareWarning)
 
 
-def session_bus_call(shell, session, *argv, timeout=10):
-    environment = ["env", f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{session['uid']}/bus"]
-    if os.geteuid() == session["uid"]:
-        return shell(*environment, *argv, timeout=timeout)
-    if os.geteuid() != 0:
-        pytest.skip(f"blocked: run as root or as session user {session['user']} to query its desktop mapping")
-    return shell("runuser", "-u", session["user"], "--", *environment, *argv, timeout=timeout)
-
-
-@pytest.fixture
-def desktop_session(shell, require_program, evidence):
-    loginctl = require_program("loginctl")
-    listed = shell(loginctl, "list-sessions", "--no-legend", timeout=5)
-    assert listed.returncode == 0, listed.stderr
-    blocks = []
-    for line in listed.stdout.splitlines():
-        session_id = line.split()[0] if line.split() else None
-        if session_id:
-            shown = shell(loginctl, "show-session", session_id, "-p", "User", "-p", "Name", "-p", "Type",
-                          "-p", "Class", "-p", "Active", "-p", "Seat", timeout=5)
-            if shown.returncode == 0:
-                blocks.append(shown.stdout)
-    session = graphical_session(blocks)
-    evidence("graphical_session", session)
-    if session is None:
-        pytest.skip("blocked: no active graphical user session; log in to GNOME to check pen mapping")
-    return session
 
 
 @pytest.mark.hardware(id="input.pen.no_output_override", component="input.pen", layer="userspace")
